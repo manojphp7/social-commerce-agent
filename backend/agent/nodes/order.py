@@ -1,108 +1,85 @@
-
 import re
 
 from agent.state import AgentState
+from agent.nodes.options import find_color, find_size
+from agent.nodes.messages import money, t
+
+
+def _summary_fields(language, product, size, color, quantity) -> dict:
+    return {
+        "name": product["name"],
+        "size": size or t(language, "not_required"),
+        "color": color or t(language, "not_required"),
+        "qty": quantity,
+        "total": money(float(product["price"]) * quantity),
+    }
 
 
 def handle_order(state: AgentState) -> dict:
 
+    language = state.get("language")
     product = state.get("product")
 
     if not product:
-        return {
-            "reply": "Please select a product first."
-        }
+        return {"reply": t(language, "need_product")}
 
     message = (state.get("message_text") or "").strip().lower()
+    intent = state.get("intent")
 
     sizes = product.get("sizes") or []
     colors = product.get("colors") or []
 
     selected_size = state.get("selected_size")
     selected_color = state.get("selected_color")
-
-    # Detect size from customer message
-    if sizes and not selected_size:
-
-        size_aliases = {
-            "small": ["small", "s"],
-            "medium": ["medium", "med", "m"],
-            "large": ["large", "l"],
-            "extra large": ["extra large", "x-large", "xl"],
-            "xxl": ["xxl", "2xl"],
-        }
-
-        for size in sizes:
-
-            normalized_size = size.lower()
-
-            aliases = size_aliases.get(
-                normalized_size,
-                [normalized_size]
-            )
-
-            for alias in aliases:
-
-                pattern = rf"(?<!\w){re.escape(alias)}(?!\w)"
-
-                if re.search(pattern, message):
-                    selected_size = size
-                    break
-
-            if selected_size:
-                break
-
-    # Detect color from customer message
-    if colors and not selected_color:
-
-        for color in colors:
-
-            pattern = rf"(?<!\w){re.escape(color.lower())}(?!\w)"
-
-            if re.search(pattern, message):
-                selected_color = color
-                break
-
-    # Detect quantity; default is 1
     quantity = state.get("quantity") or 1
 
+    detected_size = find_size(message, sizes)
+    detected_color = find_color(message, colors)
+
+    if detected_size:
+        selected_size = detected_size
+
+    if detected_color:
+        selected_color = detected_color
+
     quantity_match = re.search(
-        r"\b(\d+)\s*(?:pieces?|pcs?|items?|units?)\b",
-        message
+        r"\b(\d+)\s*(?:pieces?|pcs?|items?|units?|pair|pairs)\b", message
     )
 
     if quantity_match:
         quantity = max(1, int(quantity_match.group(1)))
 
-    # Ask for size only if product has size variations
-    if sizes and not selected_size:
-        return {
-            "selected_color": selected_color,
-            "quantity": quantity,
-            "reply": f"Please select a size: {', '.join(sizes)}"
-        }
-
-    # Ask for color only if product has color variations
-    if colors and not selected_color:
-        return {
-            "selected_size": selected_size,
-            "quantity": quantity,
-            "reply": f"Please select a color: {', '.join(colors)}"
-        }
-
-    # Order details are ready
-    total = float(product["price"]) * quantity
-
-    return {
+    result = {
         "selected_size": selected_size,
         "selected_color": selected_color,
         "quantity": quantity,
-        "reply": (
-            f"Order details confirmed!\n"
-            f"Product: {product['name']}\n"
-            f"Size: {selected_size or 'Not required'}\n"
-            f"Color: {selected_color or 'Not required'}\n"
-            f"Quantity: {quantity}\n"
-            f"Total: ₹{total:.2f}"
-        )
     }
+
+    if sizes and not selected_size:
+        result["reply"] = t(language, "select_size", options=", ".join(sizes))
+        return result
+
+    if colors and not selected_color:
+        result["reply"] = t(language, "select_color", options=", ".join(colors))
+        return result
+
+    fields = _summary_fields(language, product, selected_size, selected_color, quantity)
+
+    # Confirm only after an explicit customer confirmation.
+    if intent == "confirm_order":
+        result["reply"] = t(language, "order_confirmed", **fields)
+        # Order done: start the next conversation topic from a clean slate.
+        result.update(
+            {
+                "product": None,
+                "products": [],
+                "search_group": None,
+                "selected_size": None,
+                "selected_color": None,
+                "quantity": 1,
+            }
+        )
+        return result
+
+    result["reply"] = t(language, "order_summary", **fields)
+    return result

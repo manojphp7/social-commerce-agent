@@ -92,3 +92,24 @@ class Order(Base):
         DateTime,
         server_default=text("CURRENT_TIMESTAMP"),
     )
+
+
+class ProcessedInstagramMessage(Base):
+    __tablename__ = "processed_instagram_messages"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+
+    message_id = Column(String(255), unique=True, nullable=False)
+
+    shop_id = Column(
+        BigInteger,
+        ForeignKey("shops.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    sender_id = Column(String(50), nullable=False)
+
+    created_at = Column(
+        DateTime,
+        server_default=text("CURRENT_TIMESTAMP"),
+    )
